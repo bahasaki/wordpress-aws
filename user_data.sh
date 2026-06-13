@@ -71,9 +71,9 @@ log "[2/7] Install LAMP stack"
 dnf install -y \
   httpd \
   mariadb105-server \
-  php8.2 php8.2-mysqlnd php8.2-fpm \
-  php8.2-xml php8.2-mbstring php8.2-gd php8.2-curl \
-  php8.2-zip php8.2-intl php8.2-bcmath \
+  php php-mysqlnd php-fpm \
+  php-xml php-mbstring php-gd php-curl \
+  php-zip php-intl php-bcmath \
   fail2ban \
   firewalld
 
