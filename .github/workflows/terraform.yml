@@ -1,0 +1,251 @@
+name: Terraform CI/CD
+
+# ─────────────────────────────────────────────
+# TRIGGERS
+#
+# pull_request → план запускается на каждый PR
+#                reviewer видит что изменится до merge
+#
+# push main    → apply запускается только после merge
+#                реальный деплой в AWS
+# ─────────────────────────────────────────────
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Один деплой за раз — нельзя запустить два apply одновременно.
+# DynamoDB лок защищает state, этот блок защищает pipeline.
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TF_VERSION:        "1.5.0"
+  AWS_REGION:        "us-east-1"
+  TF_VAR_aws_region: "us-east-1"
+
+jobs:
+
+  # ─────────────────────────────────────────────
+  # JOB 1 — FORMAT & VALIDATE
+  # Запускается на каждый PR и push.
+  # Не требует AWS credentials — быстро и дёшево.
+  # Цель: поймать опечатки и стиль до того как
+  #        тратим время на plan.
+  # ─────────────────────────────────────────────
+  terraform-check:
+    name: "Format & Validate"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform ${{ env.TF_VERSION }}
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt
+        id: fmt
+        # -check  = не исправляет, только проверяет (CI не должен менять код)
+        # -recursive = проверяет bootstrap/ тоже
+        run: terraform fmt -check -recursive
+        continue-on-error: false
+
+      - name: terraform init (no backend)
+        id: init
+        # -backend=false = пропустить S3 backend, не нужны AWS credentials
+        run: terraform init -backend=false
+
+      - name: terraform validate
+        id: validate
+        run: terraform validate -no-color
+
+
+  # ─────────────────────────────────────────────
+  # JOB 2 — PLAN (только на Pull Request)
+  # Запускает terraform plan и постит результат
+  # прямо в PR как комментарий.
+  # Reviewer видит точно что изменится в AWS
+  # до того как нажать Merge.
+  # ─────────────────────────────────────────────
+  terraform-plan:
+    name: "Plan"
+    runs-on: ubuntu-latest
+    needs: terraform-check
+    if: github.event_name == 'pull_request'
+
+    permissions:
+      contents:      read
+      pull-requests: write   # нужно для постинга комментария в PR
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform ${{ env.TF_VERSION }}
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        id: init
+        run: terraform init
+
+      - name: terraform plan
+        id: plan
+        # -detailed-exitcode:
+        #   0 = нет изменений
+        #   1 = ошибка
+        #   2 = есть изменения (не ошибка)
+        run: |
+          set +e
+          terraform plan \
+            -var="domain_name=javari.cc" \
+            -var="key_pair_name=wp-server" \
+            -var="wp_admin_email=bahasaki.cc@gmail.com" \
+            -no-color \
+            -detailed-exitcode \
+            -out=tfplan 2>&1 | tee plan_output.txt
+          EXIT_CODE=${PIPESTATUS[0]}
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          # exit 1 = реальная ошибка, exit 2 = изменения есть (норм)
+          if [ $EXIT_CODE -eq 1 ]; then exit 1; fi
+
+      # Постим план в PR — самое важное для code review
+      # Если PR обновляется, обновляем существующий комментарий
+      # (не спамим новыми комментариями на каждый push)
+      - name: Post plan comment to PR
+        uses: actions/github-script@v7
+        if: always()
+        env:
+          PLAN_EXIT_CODE: ${{ steps.plan.outputs.exit_code }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs   = require('fs');
+            const raw  = fs.readFileSync('plan_output.txt', 'utf8');
+
+            // GitHub PR комментарии лимит 65 536 символов
+            const MAX  = 60000;
+            const body = raw.length > MAX
+              ? raw.substring(0, MAX) + '\n\n⚠️ Output truncated — see Actions log for full plan'
+              : raw;
+
+            const exitCode = process.env.PLAN_EXIT_CODE;
+            const icon = exitCode === '0' ? '✅ No changes'
+                       : exitCode === '2' ? '⚠️ Changes detected'
+                       : '❌ Plan failed';
+
+            const comment = [
+              `## Terraform Plan — ${icon}`,
+              '',
+              '<details>',
+              '<summary>Show plan output</summary>',
+              '',
+              '```hcl',
+              body,
+              '```',
+              '</details>',
+              '',
+              `**Actor:** @${{ github.actor }} | **Commit:** \`${{ github.sha }}\``,
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner:        context.repo.owner,
+              repo:         context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c =>
+              c.user.login === 'github-actions[bot]' &&
+              c.body.includes('Terraform Plan')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner:      context.repo.owner,
+                repo:       context.repo.repo,
+                comment_id: existing.id,
+                body:       comment,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner:        context.repo.owner,
+                repo:         context.repo.repo,
+                issue_number: context.issue.number,
+                body:         comment,
+              });
+            }
+
+
+  # ─────────────────────────────────────────────
+  # JOB 3 — APPLY (только после merge в main)
+  # Реальный деплой в AWS.
+  # Запускает plan заново (не использует артефакт
+  # из PR — могло пройти время, state мог измениться).
+  # environment: production добавляет кнопку
+  # "Require approval" в GitHub Settings.
+  # ─────────────────────────────────────────────
+  terraform-apply:
+    name: "Apply"
+    runs-on: ubuntu-latest
+    needs: terraform-check
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    # GitHub Environment — можно добавить required reviewers
+    # Settings → Environments → production → required reviewers
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform ${{ env.TF_VERSION }}
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: terraform init
+        run: terraform init
+
+      # Plan прямо перед apply — гарантирует что деплоим то
+      # что видели в PR, а не что-то изменившееся за это время
+      - name: terraform plan
+        run: |
+          terraform plan \
+            -var="domain_name=javari.cc" \
+            -var="key_pair_name=wp-server" \
+            -var="wp_admin_email=bahasaki.cc@gmail.com" \
+            -no-color \
+            -out=tfplan
+
+      - name: terraform apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Show outputs
+        if: success()
+        run: |
+          echo "================================================"
+          echo "  Deployment successful"
+          echo "================================================"
+          terraform output -no-color

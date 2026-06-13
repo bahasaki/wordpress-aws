@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and fill in values.
+# NO passwords here — they live in AWS SSM Parameter Store.
+# Run scripts/put-ssm-params.sh before terraform apply.
+
+aws_region    = "us-east-1"
+domain_name   = "javari.cc"
+key_pair_name = "wp-server"
+
+db_name        = "wordpress"
+db_user        = "wpuser"
+wp_admin_user  = "bahasaki"
+wp_admin_email = "bahasaki.cc@gmail.com"
