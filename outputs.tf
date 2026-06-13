@@ -1,14 +1,9 @@
 # ─────────────────────────────────────────────
-# STEP 1 — Add these CNAMEs to Namecheap BEFORE running terraform apply
-# (ACM won't validate until DNS exists)
+# STEP 1 — ACM DNS validation records
 # ─────────────────────────────────────────────
 
 output "acm_dns_validation_records" {
-  description = <<-EOT
-    Add these CNAME records to Namecheap Advanced DNS.
-    Do this BEFORE running `terraform apply` (or right when Terraform pauses waiting for validation).
-    Namecheap strips the root domain from the Host field — see the 'namecheap_host' value.
-  EOT
+  description = "Add these CNAME records to Namecheap Advanced DNS before or during terraform apply."
   value = {
     for dvo in aws_acm_certificate.wordpress.domain_validation_options : dvo.domain_name => {
       namecheap_host = replace(dvo.resource_record_name, ".${var.domain_name}.", "")
@@ -20,36 +15,26 @@ output "acm_dns_validation_records" {
 }
 
 # ─────────────────────────────────────────────
-# STEP 2 — After apply, add these A/CNAME records to Namecheap
+# STEP 2 — Namecheap DNS records after apply
 # ─────────────────────────────────────────────
 
-output "namecheap_dns_records" {
-  description = <<-EOT
-    Add these records to Namecheap Advanced DNS after `terraform apply` completes.
+output "cloudfront_domain" {
+  description = "CloudFront domain — add as CNAME www in Namecheap Advanced DNS"
+  value       = aws_cloudfront_distribution.wordpress.domain_name
+}
 
-    Record 1:
-      Type:  CNAME
-      Host:  www
-      Value: ${try(aws_cloudfront_distribution.wordpress.domain_name, "run apply first")}
-      TTL:   300
+output "namecheap_www_record" {
+  description = "Add to Namecheap: Type=CNAME, Host=www, Value=<cloudfront_domain>, TTL=300"
+  value       = "CNAME | www | ${aws_cloudfront_distribution.wordpress.domain_name} | TTL 300"
+}
 
-    Record 2 (root domain — Namecheap CNAME flattening / URL redirect):
-      Namecheap doesn't support CNAME at root (@).
-      Options:
-        a) Use Namecheap's "URL Redirect" record: @ → https://${var.domain_name} (301)
-        b) Use ALIAS record if available in your plan
-        c) Point @ to the CloudFront IP (not stable — not recommended)
-
-    Recommended: add a URL Redirect record for @ pointing to www.${var.domain_name}
-    and set the CloudFront alias to www.${var.domain_name} only.
-  EOT
-  value = {
-    cloudfront_domain = try(aws_cloudfront_distribution.wordpress.domain_name, "run apply first")
-  }
+output "namecheap_root_record" {
+  description = "Add to Namecheap: URL Redirect record, Host=@, Value=https://www.<domain>"
+  value       = "URL Redirect | @ | https://www.${var.domain_name}"
 }
 
 # ─────────────────────────────────────────────
-# INSTANCE INFO (for SSH and troubleshooting)
+# INSTANCE INFO
 # ─────────────────────────────────────────────
 
 output "ec2_public_ip" {
@@ -68,27 +53,21 @@ output "ssh_command" {
 }
 
 output "cloudfront_distribution_id" {
-  description = "CloudFront distribution ID — needed to update origin after IP change"
+  description = "CloudFront distribution ID"
   value       = aws_cloudfront_distribution.wordpress.id
 }
 
 output "cloudfront_url" {
-  description = "CloudFront domain (accessible before DNS propagates)"
+  description = "CloudFront URL — accessible before DNS propagates"
   value       = "https://${aws_cloudfront_distribution.wordpress.domain_name}"
 }
 
-# ─────────────────────────────────────────────
-# NO ELASTIC IP REMINDER
-# ─────────────────────────────────────────────
+output "site_url" {
+  description = "WordPress site URL"
+  value       = "https://www.${var.domain_name}"
+}
 
 output "no_elastic_ip_warning" {
-  description = "Important: how to update CloudFront origin after EC2 IP change"
-  value       = <<-EOT
-    ⚠️  No Elastic IP — after stop/start, the EC2 public IP changes.
-    To update the CloudFront origin run:
-      terraform apply   (Terraform will detect the new public_dns and update CloudFront)
-    OR manually:
-      aws cloudfront get-distribution-config --id ${aws_cloudfront_distribution.wordpress.id}
-      (update Origin DomainName, then call update-distribution)
-  EOT
+  description = "After EC2 stop/start run terraform apply to update CloudFront origin"
+  value       = "Run: terraform apply  (updates CloudFront origin with new EC2 public DNS)"
 }
