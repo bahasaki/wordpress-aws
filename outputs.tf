@@ -11,10 +11,10 @@ output "acm_dns_validation_records" {
   EOT
   value = {
     for dvo in aws_acm_certificate.wordpress.domain_validation_options : dvo.domain_name => {
-      namecheap_host  = replace(dvo.resource_record_name, ".${var.domain_name}.", "")
-      type            = dvo.resource_record_type
-      value           = trimsuffix(dvo.resource_record_value, ".")
-      ttl             = "300"
+      namecheap_host = replace(dvo.resource_record_name, ".${var.domain_name}.", "")
+      type           = dvo.resource_record_type
+      value          = trimsuffix(dvo.resource_record_value, ".")
+      ttl            = "300"
     }
   }
 }

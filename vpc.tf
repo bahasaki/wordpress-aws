@@ -24,8 +24,8 @@ data "aws_availability_zones" "available" {
 
 resource "aws_vpc" "wordpress" {
   cidr_block           = "10.0.0.0/16"
-  enable_dns_support   = true   # Required for SSM endpoint resolution
-  enable_dns_hostnames = true   # Required: EC2 public DNS used as CloudFront origin
+  enable_dns_support   = true # Required for SSM endpoint resolution
+  enable_dns_hostnames = true # Required: EC2 public DNS used as CloudFront origin
 
   tags = {
     Name    = "wordpress-vpc"
@@ -41,7 +41,7 @@ resource "aws_subnet" "public_a" {
   vpc_id                  = aws_vpc.wordpress.id
   cidr_block              = "10.0.1.0/24"
   availability_zone       = data.aws_availability_zones.available.names[0]
-  map_public_ip_on_launch = true   # EC2 gets a public IP automatically
+  map_public_ip_on_launch = true # EC2 gets a public IP automatically
 
   tags = {
     Name    = "wordpress-public-a"
