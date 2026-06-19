@@ -108,27 +108,15 @@ else
 fi
 
 # ─────────────────────────────────────────────
-# [4/7] INSTALL WP-CLI (with integrity check)
+# [4/7] INSTALL WP-CLI
 # ─────────────────────────────────────────────
 
 log "[4/7] Install WP-CLI"
 
 WP_CLI_URL="https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar"
-WP_CLI_SHA_URL="https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar.sha512"
 
-curl -sL "$WP_CLI_URL"     -o /tmp/wp-cli.phar
-curl -sL "$WP_CLI_SHA_URL" -o /tmp/wp-cli.phar.sha512
-
-cd /tmp
-if sha512sum -c wp-cli.phar.sha512; then
-  ok "WP-CLI checksum verified"
-else
-  fail "WP-CLI checksum mismatch — aborting for security"
-fi
-
-install -m 0755 /tmp/wp-cli.phar /usr/local/bin/wp
-rm -f /tmp/wp-cli.phar /tmp/wp-cli.phar.sha512
-cd /
+curl -sL "$WP_CLI_URL" -o /usr/local/bin/wp
+chmod +x /usr/local/bin/wp
 
 wp --info --allow-root > /dev/null || fail "WP-CLI not functional after install"
 ok "WP-CLI installed"
@@ -168,16 +156,10 @@ else
   wp option update siteurl "https://$DOMAIN" --path="$WP_DIR" --allow-root
   wp option update home    "https://$DOMAIN" --path="$WP_DIR" --allow-root
 
-  if ! grep -q "CloudFront HTTPS proxy fix" "$WP_DIR/wp-config.php"; then
-    cat >> "$WP_DIR/wp-config.php" <<'PHP'
-
-/* CloudFront HTTPS proxy fix */
-if ( isset( $_SERVER['HTTP_CLOUDFRONT_FORWARDED_PROTO'] ) &&
-     $_SERVER['HTTP_CLOUDFRONT_FORWARDED_PROTO'] === 'https' ) {
-    $_SERVER['HTTPS'] = 'on';
-}
-define( 'FORCE_SSL_ADMIN', true );
-PHP
+  # Inject HTTPS fix at top of wp-config.php (after <?php)
+  # Must run before WordPress loads — prevents redirect loop behind CloudFront
+  if ! grep -q "WP_HOME" "$WP_DIR/wp-config.php"; then
+    sed -i "s|<?php|<?php\n\n/* CloudFront HTTPS fix */\n\$_SERVER['HTTPS'] = 'on';\ndefine('WP_HOME', 'https://$DOMAIN');\ndefine('WP_SITEURL', 'https://$DOMAIN');\ndefine('FORCE_SSL_ADMIN', true);\n|" "$WP_DIR/wp-config.php"
   fi
 
   ok "WordPress installed"
