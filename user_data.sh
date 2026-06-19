@@ -127,6 +127,9 @@ ok "WP-CLI installed"
 
 log "[5/7] Install WordPress"
 
+# Increase PHP memory limit for WP-CLI operations
+echo "memory_limit = 256M" >> /etc/php.ini
+
 if wp core is-installed --path="$WP_DIR" --allow-root 2>/dev/null; then
   ok "WordPress already installed — skipping download"
 else
