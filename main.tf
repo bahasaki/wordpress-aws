@@ -164,7 +164,7 @@ resource "aws_instance" "wordpress" {
 
   root_block_device {
     volume_type           = "gp3"
-    volume_size           = 8 # GiB — stays within Free Tier (30 GiB total)
+    volume_size           = 30 # GiB — stays within Free Tier (30 GiB total)
     delete_on_termination = true
   }
 
