@@ -156,13 +156,13 @@ else
     --skip-email \
     --allow-root
 
-  wp option update siteurl "https://$DOMAIN" --path="$WP_DIR" --allow-root
-  wp option update home    "https://$DOMAIN" --path="$WP_DIR" --allow-root
+  wp option update siteurl "https://www.$DOMAIN" --path="$WP_DIR" --allow-root
+  wp option update home    "https://www.$DOMAIN" --path="$WP_DIR" --allow-root
 
   # Inject HTTPS fix at top of wp-config.php (after <?php)
   # Must run before WordPress loads — prevents redirect loop behind CloudFront
   if ! grep -q "WP_HOME" "$WP_DIR/wp-config.php"; then
-    sed -i "s|<?php|<?php\n\n/* CloudFront HTTPS fix */\n\$_SERVER['HTTPS'] = 'on';\ndefine('WP_HOME', 'https://$DOMAIN');\ndefine('WP_SITEURL', 'https://$DOMAIN');\ndefine('FORCE_SSL_ADMIN', true);\n|" "$WP_DIR/wp-config.php"
+    sed -i "s|<?php|<?php\n\n/* CloudFront HTTPS fix */\n\$_SERVER['HTTPS'] = 'on';\ndefine('WP_HOME', 'https://www.$DOMAIN');\ndefine('WP_SITEURL', 'https://www.$DOMAIN');\ndefine('FORCE_SSL_ADMIN', true);\n|" "$WP_DIR/wp-config.php"
   fi
 
   ok "WordPress installed"
